@@ -2,58 +2,87 @@
 <html lang="bn">
 <head>
     <meta charset="UTF-8">
-    <title>Basudeb Dental - AI Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- মোবাইল রেসপন্সিভ -->
+    <title>Basudeb Dental - AI Serial System</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        #container { text-align: center; background: #1e293b; padding: 20px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); width: 95%; max-width: 500px; border: 1px solid #334155; }
-        #reader { width: 100%; border-radius: 15px; border: 3px solid #10b981; overflow: hidden; background: #000; height: 280px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 10px; }
+        #container { text-align: center; background: #1e293b; padding: 20px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); width: 100%; max-width: 500px; border: 1px solid #334155; }
+        #reader { width: 100%; border-radius: 15px; border: 3px solid #10b981; overflow: hidden; background: #000; height: 250px; }
         #msg-box { margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.4); border-radius: 12px; min-height: 60px; border-left: 5px solid #10b981; transition: border-color 0.3s; }
-        .speaking { border-left-color: #f87171 !important; } /* কথা বলার সময় লাল হবে */
-        .active-mic { color: #f87171; font-weight: bold; animation: pulse 1s infinite; }
-        @keyframes pulse { 50% { opacity: 0.4; } }
-        .btn { background: #10b981; color: white; border: none; padding: 12px 25px; border-radius: 8px; cursor: pointer; font-size: 1.1rem; margin-bottom: 10px; font-weight: bold; }
-        .btn:hover { background: #059669; }
+        .speaking { border-left-color: #f87171 !important; }
+        .btn { background: #10b981; color: white; border: none; padding: 15px; border-radius: 8px; cursor: pointer; font-size: 1.2rem; width: 100%; font-weight: bold; }
+        .btn:active { background: #059669; }
+        
+        /* সিরিয়াল বোর্ডের ডিজাইন */
+        #serial-board { margin-top: 20px; width: 100%; max-width: 500px; background: #1e293b; padding: 15px; border-radius: 15px; border: 1px solid #334155; }
+        #serial-board h3 { margin: 0 0 10px 0; color: #fbbf24; border-bottom: 1px solid #334155; padding-bottom: 5px; }
+        .patient-item { display: flex; justify-content: space-between; background: #0f172a; padding: 10px; border-radius: 8px; margin-bottom: 8px; }
+        .serial-num { color: #10b981; font-weight: bold; font-size: 1.2rem; }
+        .patient-name { color: white; }
+        .status-done { color: #64748b; font-size: 0.9rem; }
     </style>
 </head>
 <body>
 
 <div id="container">
-    <h2 style="color: #10b981; margin-bottom: 10px;">🦷 Basudeb Dental AI</h2>
+    <h2 style="color: #10b981; margin-bottom: 10px; margin-top:0;">🦷 Basudeb Dental AI</h2>
     <button class="btn" id="startBtn" onclick="initSystem()">সিস্টেম চালু করুন</button>
     
-    <div id="reader"></div>
+    <div id="reader" style="display:none;"></div>
     
     <div id="msg-box">
-        <div id="display" style="font-size: 1.1rem; color: #fbbf24;">বাটনে ক্লিক করে কথা বলা শুরু করুন।</div>
+        <div id="display" style="font-size: 1.1rem; color: #fbbf24;">বাটনে ক্লিক করে সিস্টেম চালু করুন।</div>
     </div>
+</div>
+
+<!-- সিরিয়াল বোর্ড -->
+<div id="serial-board">
+    <h3>বর্তমান সিরিয়াল</h3>
+    <div id="patient-list">কোনো পেশেন্ট নেই</div>
 </div>
 
 <script>
     let recognition;
     let synth = window.speechSynthesis;
     let scanner;
-    let isSpeaking = false; // isTalking এর পরিবর্তে isSpeaking ব্যবহার করা হলো
-    let lastScannedToken = "";
-    let scanCooldown = false;
+    let isSpeaking = false;
+    
+    // কথোপকথনের স্টেট (কোন ধাপে আছে সিস্টেম)
+    let conversationState = 'IDLE'; 
+    let currentToken = '';
+    let currentName = '';
 
-    // ১. ভয়েস সিস্টেম সেটআপ
+    // লোকাল ডেটাবেস সেটআপ
+    const DB_KEY = 'dentalPatientsDB';
+    const COUNTER_KEY = 'dentalSerialCounter';
+
+    function getDB() {
+        return JSON.parse(localStorage.getItem(DB_KEY) || '{}');
+    }
+    function saveDB(db) {
+        localStorage.setItem(DB_KEY, JSON.stringify(db));
+        updateSerialBoard();
+    }
+    function getNextSerial() {
+        let count = parseInt(localStorage.getItem(COUNTER_KEY) || '0');
+        count++;
+        localStorage.setItem(COUNTER_KEY, count.toString());
+        return count;
+    }
+
+    // ১. ভয়েস সিস্টেম
     if ('webkitSpeechRecognition' in window) {
         recognition = new webkitSpeechRecognition();
         recognition.lang = 'bn-BD';
         recognition.continuous = true;
         recognition.interimResults = false;
-    } else {
-        alert("আপনার ব্রাউজার স্পিচ রিকগনিশন সাপোর্ট করে না। অনুগ্রহ করে Google Chrome ব্যবহার করুন।");
     }
 
-    // কথা বলার ফাংশন (এখানে মাইক বন্ধ এবং চালু করার লজিক যোগ করা হয়েছে)
     async function speak(text) {
         return new Promise((resolve) => {
             isSpeaking = true;
             document.getElementById('msg-box').classList.add('speaking');
-            
-            // এআই কথা বলার সময় মাইক বন্ধ রাখা (যাতে নিজের কথা নিজে না শুনে)
             if (recognition) recognition.stop(); 
             
             const utter = new SpeechSynthesisUtterance(text);
@@ -62,83 +91,116 @@
             utter.onend = () => {
                 isSpeaking = false;
                 document.getElementById('msg-box').classList.remove('speaking');
-                // কথা শেষ হলে আবার মাইক চালু করা
                 if (recognition) {
                     try { recognition.start(); } catch(e) {}
                 }
                 resolve();
             };
-            
             synth.speak(utter);
         });
     }
 
-    // ২. সব কথার উত্তর (Chat Logic)
-    async function handleChat(input) {
-        let text = input.toLowerCase().trim();
-        let reply = "";
-
-        if (text.includes("কেমন আছ")) reply = "আমি খুব ভালো আছি! বাসুদেব ডেন্টাল ক্লিনিকে আপনাকে সাহায্য করতে পেরে আমি খুশি।";
-        else if (text.includes("ডাক্তার") || text.includes("কখন")) reply = "ডাক্তারবাবু কিছুক্ষণের মধ্যেই আসবেন। আপনি চাইলে টোকেনটি ক্যামেরার সামনে স্ক্যান করতে পারেন।";
-        else if (text.includes("নাম কি")) reply = "আমি এই ক্লিনিকের এআই অ্যাসিস্ট্যান্ট।";
-        else if (text.includes("দাঁত") || text.includes("ব্যথা")) reply = "দাঁতের সমস্যায় অবহেলা করবেন না। আমাদের ডাক্তারবাবু খুব যত্ন সহকারে চিকিৎসা করেন।";
-        else reply = "আমি আপনার কথা বুঝতে পেরেছি। আপনি কি আপনার টোকেনটি স্ক্যান করতে চান?";
-
-        await speak(reply);
-    }
-
-    // ৩. সিস্টেম ইনিশিয়ালাইজেশন
+    // ২. সিস্টেম ইনিশিয়ালাইজেশন
     async function initSystem() {
         document.getElementById('startBtn').style.display = 'none';
-        document.getElementById('display').innerText = "আমি শুনছি, কথা বলুন বা টোকেন দেখান...";
+        document.getElementById('reader').style.display = 'block';
+        document.getElementById('display').innerText = "ক্যামেরা চালু হচ্ছে...";
+        updateSerialBoard(); // আগের ডেটা স্ক্রিনে দেখানো
 
         scanner = new Html5Qrcode("reader");
-        
-        const config = { 
-            fps: 30, 
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
-        };
+        const config = { fps: 30, qrbox: { width: 200, height: 200 } };
 
         try {
+            // মোবাইলের ব্যাক ক্যামেরা ব্যবহারের জন্য "environment"
             await scanner.start({ facingMode: "environment" }, config, onScanSuccess);
             startListening();
+            document.getElementById('display').innerText = "আমি শুনছি, টোকেন দেখান বা কথা বলুন...";
         } catch (err) {
-            document.getElementById('display').innerText = "ক্যামেরা বা মাইক পারমিশন দিন। অথবা HTTPS ছাড়া এটি চলবে না।";
-            console.error(err);
+            document.getElementById('display').innerText = "ক্যামেরা পারমিশন দিন বা HTTPS লিংক ব্যবহার করুন।";
         }
     }
 
-    // কিউআর স্ক্যান সফল হলে (কুলডাউন লজিক যোগ করা হয়েছে)
-    function onScanSuccess(decodedText) {
-        // যদি এআই কথা বলছে বা একই টোকেন কুলডাউন টাইমের মধ্যে স্ক্যান হয়, তবে বাদ দিন
-        if (isSpeaking || scanCooldown || decodedText === lastScannedToken) return;
+    let lastScannedToken = "";
+    let scanCooldown = false;
 
+    function onScanSuccess(decodedText) {
+        if (isSpeaking || scanCooldown || decodedText === lastScannedToken) return;
+        
         lastScannedToken = decodedText;
         scanCooldown = true;
+        setTimeout(() => { lastScannedToken = ""; scanCooldown = false; }, 15000);
 
         processToken(decodedText);
-
-        // ১৫ সেকেন্ড পর আবার একই টোকেন স্ক্যান করা সম্ভব হবে (পেশেন্ট যেন দ্বিতীয়বার স্ক্যান করতে পারে)
-        setTimeout(() => {
-            lastScannedToken = "";
-            scanCooldown = false;
-        }, 15000); 
     }
 
+    // ৩. টোকেন প্রসেসিং (নতুন বা পুরানো চেক)
+    async function processToken(tokenId) {
+        currentToken = tokenId;
+        const db = getDB();
+
+        if (db[tokenId]) {
+            // টোকেন আগে থেকেই আছে
+            conversationState = 'CHECK_STATUS';
+            const p = db[tokenId];
+            await speak(`আপনার টোকেন বুক আছে। আপনার সিরিয়াল নম্বর ${p.serial}। আপনার কি দেখানো হয়ে গেছে?`);
+        } else {
+            // নতুন টোকেন
+            conversationState = 'ASK_NAME';
+            await speak("নতুন টোকেন পাওয়া গেছে। আপনার নাম বলুন।");
+        }
+    }
+
+    // ৪. ভয়েস কমান্ড হ্যান্ডলিং (স্টেট অনুযায়ী)
     function startListening() {
         if (!recognition) return;
-        
         recognition.start();
+        
         recognition.onresult = async (event) => {
             if (isSpeaking) return;
             const last = event.results.length - 1;
-            const command = event.results[last][0].transcript;
+            const command = event.results[last][0].transcript.trim();
             document.getElementById('display').innerHTML = `আপনি বলেছেন: <span style="color:white">${command}</span>`;
-            await handleChat(command);
+
+            const db = getDB();
+
+            if (conversationState === 'ASK_NAME') {
+                currentName = command;
+                conversationState = 'ASK_ADDRESS';
+                await speak(`আপনার নাম ${currentName}। আপনার ঠিকানা বলুন।`);
+            
+            } else if (conversationState === 'ASK_ADDRESS') {
+                const address = command;
+                const serial = getNextSerial();
+                
+                // ডেটাবেসে সেভ
+                db[currentToken] = {
+                    name: currentName,
+                    address: address,
+                    serial: serial,
+                    status: 'waiting'
+                };
+                saveDB(db);
+                
+                conversationState = 'IDLE';
+                await speak(`আপনার রেজিস্ট্রেশন সম্পন্ন হয়েছে। আপনার সিরিয়াল নম্বর ${serial}। বসে অপেক্ষা করুন।`);
+            
+            } else if (conversationState === 'CHECK_STATUS') {
+                const ans = command.toLowerCase();
+                if (ans.includes("হ্যাঁ") || ans.includes("হ্য") || ans.includes("গেছে") || ans.includes("yes")) {
+                    db[currentToken].status = 'done';
+                    saveDB(db);
+                    await speak("খুব ভালো, আপনার চিকিৎসা শেষ। ধন্যবাদ।");
+                } else {
+                    await speak("ঠিক আছে, আপনার সিরিয়ালে ডাকা হবে, বসে অপেক্ষা করুন।");
+                }
+                conversationState = 'IDLE';
+            
+            } else {
+                // সাধারণ কথোপকথন
+                await handleChat(command);
+            }
         };
         
-        // যদি মাইক সাইলেন্স হয়ে বন্ধ হয়ে যায়, আর এআই কথা না বলছে তবে আবার চালু করবে
         recognition.onend = () => {
             if (!isSpeaking) {
                 try { recognition.start(); } catch(e) {}
@@ -146,11 +208,40 @@
         };
     }
 
-    async function processToken(data) {
-        let id = data.substring(0, 6).toUpperCase();
-        document.getElementById('display').innerHTML = `স্ক্যান হয়েছে: <span style="color:#10b981">${id}</span>`;
-        await speak("টোকেন পাওয়া গেছে। আইডি নম্বর " + id + "। আপনার নাম বলুন।");
+    // সাধারণ কথোপকথন
+    async function handleChat(text) {
+        let reply = "";
+        if (text.includes("কেমন আছ")) reply = "আমি খুব ভালো আছি!";
+        else if (text.includes("ডাক্তার")) reply = "ডাক্তারবাবু কিছুক্ষণের মধ্যেই আসবেন।";
+        else reply = "আমি আপনার কথা বুঝতে পেরেছি। আপনি কি আপনার টোকেন স্ক্যান করতে চান?";
+        await speak(reply);
     }
+
+    // ৫. সিরিয়াল বোর্ড আপডেট (UI)
+    function updateSerialBoard() {
+        const db = getDB();
+        const listDiv = document.getElementById('patient-list');
+        const patients = Object.values(db).sort((a, b) => a.serial - b.serial);
+        
+        if (patients.length === 0) {
+            listDiv.innerHTML = "কোনো পেশেন্ট নেই";
+            return;
+        }
+
+        let html = "";
+        patients.forEach(p => {
+            const statusText = p.status === 'done' ? '✅ দেখানো হয়েছে' : '⏳ অপেক্ষমাণ';
+            const styleClass = p.status === 'done' ? 'status-done' : 'patient-name';
+            html += `
+                <div class="patient-item">
+                    <span class="serial-num">${p.serial}</span>
+                    <span class="${styleClass}">${p.name} - ${statusText}</span>
+                </div>
+            `;
+        });
+        listDiv.innerHTML = html;
+    }
+
 </script>
 
 </body>
